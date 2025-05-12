@@ -3,7 +3,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 dotenv.config();
 
-const booksRouter = require('./routes/books');
+const booksRouters = require('./routes/bookRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,7 +16,7 @@ app.get('/', async (req, res) => {
   res.end('<h1>Reading Book API</h1>');
 });
 
-app.use('/books', booksRouter);
+app.use('/books', booksRouters);
 
 // Start the server
 app.listen(PORT, () => {
