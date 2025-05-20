@@ -191,4 +191,74 @@ router.get('/:id/chapters/previous', async (req, res) => {
   }
 });
 
+// Post /books/:id/like
+router.post('/:id/like', async (req, res) => {
+  const {id: book_id} = req.params;
+  const {user_id} = req.body;
+  console.log('req', req);
+  console.log('body', req.body);
+  console.log('params', req.params);
+
+  if (!user_id) {
+    return res.status(400).json({error: 'user_id is required'});
+  }
+
+  try {
+    // Kiểm tra bản ghi like đã tồn tại chưa
+    const {data: existingLike, error: fetchError} = await supabase
+      .from('likes')
+      .select('*')
+      .eq('book_id', book_id)
+      .eq('user_id', user_id)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      // PGRST116 = no rows returned
+      throw new Error(fetchError.message);
+    }
+
+    let is_liked = true;
+
+    if (existingLike) {
+      // Toggle trạng thái like
+      is_liked = !existingLike.is_liked;
+
+      const {error: updateError} = await supabase
+        .from('likes')
+        .update({
+          is_liked,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('book_id', book_id)
+        .eq('user_id', user_id);
+
+      if (updateError) throw new Error(updateError.message);
+    } else {
+      // Chưa từng like -> thêm bản ghi mới
+      const {error: insertError} = await supabase.from('likes').insert({
+        user_id,
+        book_id,
+        is_liked: true,
+      });
+
+      if (insertError) throw new Error(insertError.message);
+    }
+
+    // Cập nhật số lượng likes trong bảng books
+    const {count, error: countError} = await supabase
+      .from('likes')
+      .select('*', {count: 'exact'})
+      .eq('book_id', book_id)
+      .eq('is_liked', true);
+
+    if (countError) throw new Error(countError.message);
+
+    await supabase.from('books').update({total_likes: count}).eq('id', book_id);
+
+    res.json({message: is_liked ? 'Liked' : 'Unliked'});
+  } catch (error) {
+    res.status(500).json({error: error.message});
+  }
+});
+
 module.exports = router;
