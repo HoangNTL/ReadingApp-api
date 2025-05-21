@@ -49,6 +49,59 @@ router.get('/latest', async (req, res) => {
   res.json(data);
 });
 
+// GET /books/like
+// get all books liked by a user
+router.get('/like', async (req, res) => {
+  const {user_id} = req.query;
+
+  if (!user_id) {
+    return res.status(400).json({message: 'Missing user_id'});
+  }
+
+  try {
+    const {data, error} = await supabase
+      .from('likes')
+      .select('books(id, title, cover_image)')
+      .eq('user_id', user_id)
+      .eq('is_liked', true);
+
+    if (error) throw error;
+
+    const likedBooks = data.map(entry => entry.books);
+
+    return res.json(likedBooks);
+  } catch (error) {
+    console.error('Error fetching liked books:', error);
+    return res.status(500).json({message: 'Internal server error'});
+  }
+});
+
+// Get /books/search
+// Search for books by title or author
+router.get('/search', async (req, res) => {
+  const { keyword } = req.query;
+
+  if (!keyword) {
+    return res.status(400).json({message: 'Missing keyword'});
+  }
+
+  try {
+    const {data, error} = await supabase
+      .from('books')
+      .select(
+        'id, title, author, views_count, total_likes, total_chapters, cover_image, book_genres (genre_id), genres (id, name)',
+      )
+      .ilike('title', `%${keyword}%`);
+
+    if (error) throw error;
+
+    return res.json(data);
+  } catch (error) {
+    console.error('Error searching books:', error);
+    return res.status(500).json({message: 'Internal server error'});
+  }
+});
+
 // Get /books/:id
 // Get a book by id
 router.get('/:id', async (req, res) => {
@@ -195,32 +248,24 @@ router.get('/:id/chapters/previous', async (req, res) => {
 router.post('/:id/like', async (req, res) => {
   const {id: book_id} = req.params;
   const {user_id} = req.body;
-  console.log('req', req);
-  console.log('body', req.body);
-  console.log('params', req.params);
 
   if (!user_id) {
     return res.status(400).json({error: 'user_id is required'});
   }
 
   try {
-    // Kiểm tra bản ghi like đã tồn tại chưa
+    // Kiểm tra bản ghi like có tồn tại không
     const {data: existingLike, error: fetchError} = await supabase
       .from('likes')
       .select('*')
       .eq('book_id', book_id)
       .eq('user_id', user_id)
-      .single();
+      .maybeSingle(); // Không lỗi nếu không có bản ghi
 
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      // PGRST116 = no rows returned
-      throw new Error(fetchError.message);
-    }
-
-    let is_liked = true;
+    let is_liked;
 
     if (existingLike) {
-      // Toggle trạng thái like
+      // Đã từng like => Toggle trạng thái
       is_liked = !existingLike.is_liked;
 
       const {error: updateError} = await supabase
@@ -234,7 +279,9 @@ router.post('/:id/like', async (req, res) => {
 
       if (updateError) throw new Error(updateError.message);
     } else {
-      // Chưa từng like -> thêm bản ghi mới
+      // Chưa từng like => Thêm mới
+      is_liked = true;
+
       const {error: insertError} = await supabase.from('likes').insert({
         user_id,
         book_id,
@@ -244,20 +291,60 @@ router.post('/:id/like', async (req, res) => {
       if (insertError) throw new Error(insertError.message);
     }
 
-    // Cập nhật số lượng likes trong bảng books
+    // Cập nhật tổng số like trong bảng books
     const {count, error: countError} = await supabase
       .from('likes')
-      .select('*', {count: 'exact'})
+      .select('*', {count: 'exact', head: true})
       .eq('book_id', book_id)
       .eq('is_liked', true);
 
     if (countError) throw new Error(countError.message);
 
-    await supabase.from('books').update({total_likes: count}).eq('id', book_id);
+    const {error: updateBookError} = await supabase
+      .from('books')
+      .update({total_likes: count})
+      .eq('id', book_id);
 
-    res.json({message: is_liked ? 'Liked' : 'Unliked'});
+    if (updateBookError) throw new Error(updateBookError.message);
+
+    res.status(200).json({
+      message: is_liked ? 'Liked' : 'Unliked',
+      is_liked,
+      total_likes: count,
+    });
   } catch (error) {
-    res.status(500).json({error: error.message});
+    res.status(500).json({error: 'Like action failed: ' + error.message});
+  }
+});
+
+// Get /books/:id/like
+// Check if a user has liked a book
+router.get('/:id/like', async (req, res) => {
+  const {id: book_id} = req.params;
+  // const {user_id} = req.body;
+  const {user_id} = req.query;
+
+  if (!user_id) {
+    return res.status(400).json({error: 'user_id is required'});
+  }
+
+  try {
+    const {data: like, error} = await supabase
+      .from('likes')
+      .select('is_liked')
+      .eq('book_id', book_id)
+      .eq('user_id', user_id)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+
+    res.json({
+      is_liked: like?.is_liked === true, // Trả về true nếu like tồn tại và là true
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({error: 'Failed to get like status: ' + error.message});
   }
 });
 
