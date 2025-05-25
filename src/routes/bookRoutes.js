@@ -76,10 +76,37 @@ router.get('/like', async (req, res) => {
   }
 });
 
+// GET /books/save
+// Get all books saved by a user
+router.get('/save', async (req, res) => {
+  const {user_id} = req.query;
+
+  if (!user_id) {
+    return res.status(400).json({message: 'Missing user_id'});
+  }
+
+  try {
+    const {data, error} = await supabase
+      .from('saved_books')
+      .select('books(id, title, cover_image)')
+      .eq('user_id', user_id)
+      .eq('is_saved', true);
+
+    if (error) throw error;
+
+    const savedBooks = data.map(entry => entry.books);
+
+    return res.json(savedBooks);
+  } catch (error) {
+    console.error('Error fetching saved books:', error);
+    return res.status(500).json({message: 'Internal server error'});
+  }
+});
+
 // Get /books/search
 // Search for books by title or author
 router.get('/search', async (req, res) => {
-  const { keyword } = req.query;
+  const {keyword} = req.query;
 
   if (!keyword) {
     return res.status(400).json({message: 'Missing keyword'});
@@ -345,6 +372,93 @@ router.get('/:id/like', async (req, res) => {
     res
       .status(500)
       .json({error: 'Failed to get like status: ' + error.message});
+  }
+});
+
+// POST /books/:id/save
+// Save or unsave a book for a user
+router.post('/:id/save', async (req, res) => {
+  const {id: book_id} = req.params;
+  const {user_id} = req.body;
+
+  if (!user_id) {
+    return res.status(400).json({error: 'user_id is required'});
+  }
+
+  try {
+    // Kiểm tra xem user đã từng lưu chưa
+    const {data: existingSave, error: fetchError} = await supabase
+      .from('saved_books')
+      .select('*')
+      .eq('book_id', book_id)
+      .eq('user_id', user_id)
+      .maybeSingle();
+
+    let is_saved;
+
+    if (existingSave) {
+      // Toggle trạng thái lưu
+      is_saved = !existingSave.is_saved;
+
+      const {error: updateError} = await supabase
+        .from('saved_books')
+        .update({
+          is_saved,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('book_id', book_id)
+        .eq('user_id', user_id);
+
+      if (updateError) throw new Error(updateError.message);
+    } else {
+      // Lưu lần đầu
+      is_saved = true;
+
+      const {error: insertError} = await supabase.from('saved_books').insert({
+        user_id,
+        book_id,
+        is_saved: true,
+      });
+
+      if (insertError) throw new Error(insertError.message);
+    }
+
+    res.status(200).json({
+      message: is_saved ? 'Saved' : 'Unsaved',
+      is_saved,
+    });
+  } catch (error) {
+    res.status(500).json({error: 'Save action failed: ' + error.message});
+  }
+});
+
+// GET /books/:id/save
+// Check if a user has saved a book
+router.get('/:id/save', async (req, res) => {
+  const {id: book_id} = req.params;
+  const {user_id} = req.query;
+
+  if (!user_id) {
+    return res.status(400).json({error: 'user_id is required'});
+  }
+
+  try {
+    const {data: save, error} = await supabase
+      .from('saved_books')
+      .select('is_saved')
+      .eq('book_id', book_id)
+      .eq('user_id', user_id)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+
+    res.json({
+      is_saved: save?.is_saved === true, // Trả về true nếu đã lưu
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({error: 'Failed to get save status: ' + error.message});
   }
 });
 
