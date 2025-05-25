@@ -18,13 +18,17 @@ router.post('/login', async (req, res) => {
       .single();
 
     if (error || !user) {
-      return res.status(400).json({error: 'Invalid credentials'});
+      return res
+        .status(400)
+        .json({error: 'Email or Password is invalid. Please try again.'});
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      return res.status(400).json({error: 'Invalid credentials'});
+      return res
+        .status(400)
+        .json({error: 'Email or Password is invalid. Please try again.'});
     }
 
     // Trả về thông tin người dùng (có thể thêm token nếu cần)
